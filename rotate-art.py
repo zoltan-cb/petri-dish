@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
-"""Rotate Haeckel art on Inky Impression e-ink displays.
+"""Rotate natural history art on Inky Impression e-ink displays.
 
+Shows plates from Haeckel's Kunstformen der Natur and Brehm's Tierleben.
 Auto-detects display dimensions via inky.auto. Downloads a random plate
-from a curated list (white-background plates only), avoiding the last shown.
+from a curated list, avoiding the last shown.
 Scales to FIT (not crop), preserving full image with white margins.
 Quantizes to 7-colour palette with Floyd-Steinberg dithering.
 
@@ -25,7 +26,7 @@ STATE_FILE = Path.home() / ".haeckel-state.json"
 
 # Curated Haeckel plates — WHITE/LIGHT backgrounds only.
 # Aesthetic: "butterfly pinned on a white page" — subject floats in centre.
-PLATES = [
+HAECKEL_PLATES = [
     ("Haeckel_Narcomedusae", "https://upload.wikimedia.org/wikipedia/commons/2/22/Haeckel_Narcomedusae.jpg"),
     ("Haeckel_Muscinae", "https://upload.wikimedia.org/wikipedia/commons/e/ee/Haeckel_Muscinae.jpg"),
     ("Haeckel_Trochilidae", "https://upload.wikimedia.org/wikipedia/commons/8/8e/Haeckel_Trochilidae.jpg"),
@@ -47,6 +48,38 @@ PLATES = [
     ("Haeckel_Calcispongiae", "https://upload.wikimedia.org/wikipedia/commons/5/59/Haeckel_Calcispongiae.jpg"),
 ]
 
+# Curated Brehm's Tierleben plates — 19th century natural history lithographs.
+# Mix of colour chromolithographic bird plates and detailed animal drawings.
+# Style is more naturalistic (habitat scenes) vs Haeckel's white-background aesthetic.
+# All sourced from Wikimedia Commons (public domain).
+BREHM_PLATES = [
+    # Birds — chromolithographic plates by Gustav Mützel et al.
+    ("Brehm_GoldenEagle", "https://upload.wikimedia.org/wikipedia/commons/6/64/GoldenEagleBrehm.jpg"),
+    ("Brehm_Gyrfalcon", "https://upload.wikimedia.org/wikipedia/commons/a/a1/GyrfalconBrehm.jpg"),
+    ("Brehm_Flamingo", "https://upload.wikimedia.org/wikipedia/commons/0/0a/FlamingoBrehm.jpg"),
+    ("Brehm_Roller", "https://upload.wikimedia.org/wikipedia/commons/c/cd/RollerBrehm.jpg"),
+    ("Brehm_WhiteStork", "https://upload.wikimedia.org/wikipedia/commons/3/34/WhiteStorkBrehm.jpg"),
+    ("Brehm_Lapwing", "https://upload.wikimedia.org/wikipedia/commons/0/0d/LapwingBrehm.jpg"),
+    ("Brehm_Woodpeckers", "https://upload.wikimedia.org/wikipedia/commons/6/6c/WoodpeckersBrehm.jpg"),
+    ("Brehm_Oriole", "https://upload.wikimedia.org/wikipedia/commons/a/a6/OrioleBrehm.jpg"),
+    ("Brehm_Mallard", "https://upload.wikimedia.org/wikipedia/commons/8/85/MallardBrehm.jpg"),
+    ("Brehm_Lammergeier", "https://upload.wikimedia.org/wikipedia/commons/1/1d/LammergeierBrehms.jpg"),
+    ("Brehm_Pitta", "https://upload.wikimedia.org/wikipedia/commons/6/61/PittaBrachyuraBrehms.jpg"),
+    ("Brehm_Owl", "https://upload.wikimedia.org/wikipedia/commons/3/3c/OwlBrehm.jpg"),
+    ("Brehm_Cranes", "https://upload.wikimedia.org/wikipedia/commons/7/79/Brehm-Gruidae.jpg"),
+    ("Brehm_Redstart", "https://upload.wikimedia.org/wikipedia/commons/0/03/RedstartBrehm.jpg"),
+    ("Brehm_GoldfinchChaffinch", "https://upload.wikimedia.org/wikipedia/commons/3/34/GoldfinchChaffinchBrehm.jpg"),
+    # Mammals & other — detailed drawings and paintings
+    ("Brehm_AfricanElephant", "https://upload.wikimedia.org/wikipedia/commons/3/38/Afrikanischer_Elefant-painting.jpg"),
+    ("Brehm_Primates", "https://upload.wikimedia.org/wikipedia/commons/5/54/Primates-drawing.jpg"),
+    ("Brehm_Fulmar", "https://upload.wikimedia.org/wikipedia/commons/a/ae/Eissturmvogel-drawing.jpg"),
+    ("Brehm_FlyingLemur", "https://upload.wikimedia.org/wikipedia/commons/b/bc/Cynocephalus_volans_Brehm1883.jpg"),
+    ("Brehm_Amphibia", "https://upload.wikimedia.org/wikipedia/commons/d/da/Brehm_amphibia.jpg"),
+]
+
+# Combined plate list for random selection
+PLATES = HAECKEL_PLATES + BREHM_PLATES
+
 
 def load_state():
     if STATE_FILE.exists():
@@ -54,7 +87,7 @@ def load_state():
             return json.loads(STATE_FILE.read_text())
         except Exception:
             pass
-    return {"last": None}
+    return {"last": None, "rotation_offset": 0}
 
 
 def save_state(state):
@@ -70,8 +103,29 @@ def pick_plate(state):
 
 
 def main():
+    import argparse
+    parser = argparse.ArgumentParser(description="Rotate Haeckel art on e-ink displays")
+    parser.add_argument("--rotation-offset", type=int, choices=[0, 90, 180, 270],
+                        help="Set rotation offset (0/90/180/270) and save to state file")
+    parser.add_argument("--plate", type=str, help="Force a specific plate by name (e.g. Haeckel_Trochilidae)")
+    args = parser.parse_args()
+
     state = load_state()
-    name, url = pick_plate(state)
+
+    if args.rotation_offset is not None:
+        state["rotation_offset"] = args.rotation_offset
+        save_state(state)
+        print(f"Rotation offset set to {args.rotation_offset}°")
+
+    if args.plate:
+        matches = [p for p in PLATES if p[0] == args.plate]
+        if not matches:
+            print(f"Unknown plate: {args.plate}")
+            print(f"Available: {', '.join(p[0] for p in PLATES)}")
+            sys.exit(1)
+        name, url = matches[0]
+    else:
+        name, url = pick_plate(state)
 
     print(f"Downloading {name}...")
     with tempfile.NamedTemporaryFile(suffix=".jpg", delete=False) as f:
@@ -103,7 +157,12 @@ def main():
         img = canvas
 
         if rotate:
-            img = img.rotate(90, expand=True)
+            img = img.rotate(-90, expand=True)
+
+        # Apply per-display rotation offset (0, 90, 180, 270) from state file
+        rotation_offset = state.get("rotation_offset", 0)
+        if rotation_offset:
+            img = img.rotate(rotation_offset, expand=True)
 
         # Quantize to 7-colour with dithering
         palette_img = Image.new("P", (1, 1))
